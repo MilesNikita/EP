@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сервер хранения электронной подписи</title>
+</head>
+<body>
+        <h2>Добавить пользователя:</h2>
+        <form id="addUserForm" action="/add_user" method="POST">
+            <label for="add_user_id">User ID:</label>
+            <input type="text" name="add_user_id" required>
+            <label for="add_user_fio">Полное имя:</label>
+            <input type="text" name="add_user_fio" required>
+            <label for="add_user_password">Пароль:</label>
+            <input type="password" name="add_user_password" required>
+            <button type="submit">Добавить</button>
+        </form>
+
+    <hr>
+    <h2>Информация о пользователях:</h2>
+    <table border="1" id="user_info_table">
+        <thead>
+            <tr>
+                <th>User ID</th>
+                <th>Полное имя</th>
+                <th>Открытиый ключ</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Данные о пользователях будут отображаться здесь -->
+            {% for user_id, user_info in user_data.items() %}
+                <tr>
+                    <td>{{ user_id }}</td>
+                    <td>{{ user_info.fio }}</td>
+                    <td>{{ user_info.public_key }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <script>
+        async function getSignature(e) {
+            e.preventDefault(); // Prevent the default form submission behavior
+    
+            const form = document.getElementById('signatureForm');
+            const userId = form.querySelector('[name="user_id"]').value;
+            const userFio = form.querySelector('[name="user_fio"]').value;
+    
+            const response = await fetch('/get_signature', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    'user_id': userId,
+                    'user_fio': userFio,
+                }),
+            });
+    
+            const result = await response.json();
+            updateSearchResultTable(result.user_data);
+        }
+    
+    
+        function updateSearchResultTable(userData) {
+            const tableBody = document.getElementById('search_result_body');
+    
+            // Clear the table
+            tableBody.innerHTML = '';
+    
+            // Add rows with search results
+            for (const [userId, userInfo] of Object.entries(userData)) {
+                const newRow = tableBody.insertRow();
+                newRow.insertCell(0).textContent = userId;
+                newRow.insertCell(1).textContent = userInfo.fio;
+                newRow.insertCell(2).textContent = userInfo.public_key;
+                newRow.insertCell(3).textContent = userInfo.signature;
+            }
+        }
+    
+        async function addUser() {
+            const form = document.getElementById('addUserForm');
+            const userId = form.querySelector('[name="add_user_id"]').value;
+            const userFio = form.querySelector('[name="add_user_fio"]').value;
+            const userPassword = form.querySelector('[name="add_user_password"]').value;
+            const response = await fetch('/add_user', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    'add_user_id': userId,
+                    'add_user_fio': userFio,
+                    'add_user_password': userPassword,
+                }),
+            });
+            const result = await response.json();
+            updateUserTable(result.user_data);
+            form.reset();
+        }
+    
+        function updateUserTable(userData) {
+            const tableBody = document.getElementById('user_info_table').getElementsByTagName('tbody')[0];
+            for (const [userId, userInfo] of Object.entries(userData)) {
+                const newRow = tableBody.insertRow();
+                newRow.insertCell(0).textContent = userId;
+                newRow.insertCell(1).textContent = userInfo.fio;
+                newRow.insertCell(2).textContent = userInfo.public_key;
+                newRow.insertCell(3).textContent = userInfo.signature;
+            }
+        }
+    </script>
+</body>
+</html>

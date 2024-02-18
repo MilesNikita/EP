@@ -1,0 +1,10 @@
+{
+  "signatures": {
+    "document_content": "Hello World\n\n",
+    "metadata": {
+      "signed_by": [],
+      "timestamp": "2024-02-18 22:01:53.314750"
+    },
+    "signatures": {}
+  }
+}
