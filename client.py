@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui, QtWidgets
 from gui import Ui_MainWindow
 import requests
+from OpenSSL import crypto
 
 class AppMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -14,6 +15,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         self.pushButton.clicked.connect(self.click_add)
         self.pushButton_2.clicked.connect(self.click_del)
         self.pushButton_3.clicked.connect(self.sign_document)
+        self.pushButton_4.clicked.connect(self.verify_documet)
         self.server_ip = ''
         self.server_port = ''
 
@@ -24,7 +26,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
             self.lineEdit.setText(file_path)
 
     def show_program_info(self):
-        info_message = "Данная программа предназначена для создание файлов с коллективной электронной подписью.\nАвторы: Кострицын Т.В. Каширин Е.В."
+        info_message = "Данная программа предназначена для создание файлов с коллективной электронной подписью на основе ГОСТ-34.10-2012"
         QMessageBox.information(self, 'Информация о программе', info_message)
 
     def click_add(self):
@@ -53,13 +55,47 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
             try:
                 response = requests.post(url, files=files, data=data)
                 if response.status_code == 200:
-                    with open('signed_file.txt', 'wb') as f:
+                    new_file_name = file_path + '.ezp'
+                    with open(new_file_name, 'wb') as f:
                         f.write(response.content)
                     QMessageBox.information(self, 'Успех', 'Файл успешно подписан и скачан.')
                 else:
                     QMessageBox.critical(self, 'Ошибка', 'Произошла ошибка при подписании файла.')
             except requests.exceptions.RequestException as e:
                 QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
+        else:
+            QMessageBox.warning(self, 'Предупреждение', 'Выберите файл для осуществления подписи')
+
+    def verify_documet(self):
+        file_path = self.lineEdit.text()
+        file_dialog = QFileDialog(self)
+        file_path_sert, _ = file_dialog.getOpenFileName(self, 'Выберите файл подписи', '', 'Все файлы (*)')
+        if file_path_sert:
+            if file_path:
+                url = f'http://{self.server_ip}:{self.server_port}/verify_signature'
+                files = {
+                'file': open(file_path, 'rb'),
+                'signature': open(file_path_sert, 'rb')
+                }
+                selected_users = [self.listWidget.item(i).text() for i in range(self.listWidget.count())]
+                if not selected_users:
+                    QMessageBox.warning(self, 'Предупреждение', 'Выберите хотя бы одного пользователя для проверки подписи файла.')
+                data = {'user_ids': selected_users}
+                try:
+                    response = requests.post(url, files=files, data=data)
+                    if response.status_code == 200:
+                        if response.content:
+                            QMessageBox.information(self, 'Успех', 'Файл успешно подписан и скачан.')
+                        else:
+                            QMessageBox.critical(self, 'Ошибка', 'Подпись не совпадает.')
+                    else:
+                        QMessageBox.critical(self, 'Ошибка', 'Произошла ошибка при проверке подписи файла.')
+                except requests.exceptions.RequestException as e:
+                    QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
+            else:
+                QMessageBox.warning(self, 'Предупреждение', 'Выберите файл для проверки подписи')
+        else:
+            QMessageBox.warning(self, 'Предупреждение', 'Выберите файл подписи')
 
     closed = QtCore.pyqtSignal()
     def closeEvent(self, event):
@@ -119,7 +155,7 @@ class LoginWindow(QMainWindow):
                 else:
                     QMessageBox.critical(self, 'Ошибка', 'Проверьте логин/пароль')
         except requests.exceptions.RequestException as e:
-            self.show_message('Error', f"An error occurred: {e}")
+            QMessageBox.critical(self, 'Ошибка', f'An error occurred: {e}')
 
     def open_main_window(self, fio):
         self.app_main_window = AppMainWindow()

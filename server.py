@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa, utils, padding 
+from cryptography.hazmat.primitives.asymmetric import rsa, utils, padding
 from cryptography.hazmat.primitives import serialization, hashes
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -8,15 +8,19 @@ import json
 import os
 import hashlib
 from datetime import datetime
-from magic import Magic
+import base64
 import mimetypes
+import gostcrypto
+import secrets
+from binascii import hexlify
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
-
+app.secret_key = secrets.token_bytes(24)
 USER_DATA_FILE = 'data.json'
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+sign_obj = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
+    gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
 
 try:
     with open(USER_DATA_FILE, 'r', encoding='utf-8') as file:
@@ -24,80 +28,66 @@ try:
 except FileNotFoundError:
     user_data = {}
 
-
 def save_user_data():
     with open(USER_DATA_FILE, 'w') as file:
-        json.dump(user_data, file, indent=2)
-
+        serializable_data = {key: value.hex() if isinstance(value, bytearray) else value for key, value in user_data.items()}
+        json.dump(serializable_data, file, indent=2)
 
 def generate_key_pair():
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=default_backend()
-    )
-    public_key = private_key.public_key()
+    private_key = bytearray(secrets.token_bytes(32))
+    public_key = sign_obj.public_key_generate(private_key)
     return private_key, public_key
 
+def read_user_public_keys(json_file, user_ids):
+    puplick_key = []
+    with open(json_file, 'r') as file:
+        data = json.load(file)
+    for id, user_info in data.items():
+        if user_info['fio'] in user_ids:
+            puplick_key.append(user_info['public_key'])
+    return puplick_key
+
+def read_user_private_keys(json_file, user_ids):
+    puplick_key = []
+    with open(json_file, 'r') as file:
+        data = json.load(file)
+    for id, user_info in data.items():
+        if user_info['fio'] in user_ids:
+            puplick_key.append(user_info['private_key'])
+    return puplick_key
+
 def sign_document_server(document_content, user_ids):
-    signatures = {}
-    metadata = {
-        'signed_by': [],
-        'timestamp': str(datetime.now())
-    }
-    file_type, _ = mimetypes.guess_type(document_content)
-    if file_type is not None and 'text' in file_type:  
-        with open(document_content, 'r', encoding='utf-8') as file:
-            document = file.read()
-            for user_id in user_ids:
-                private_key_pem = user_keys.get(user_id, {}).get('private_key')
-                if private_key_pem:
-                    private_key = serialization.load_pem_private_key(
-                        private_key_pem.encode('utf-8'),
-                        password=None,
-                        backend=default_backend()
-                    )
-                    document_hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
-                    document_hash.update(document.encode('utf-8'))
-                    signature = private_key.sign(
-                        document_hash.finalize(),
-                        padding.PSS(
-                            mgf=padding.MGF1(hashes.SHA256()),
-                            salt_length=padding.PSS.MAX_LENGTH
-                        ),
-                        hashes.SHA256()
-                    )
-                    signatures[user_id] = signature.hex()
-                    metadata['signed_by'].append(user_id)
-    else:  
-        with open(document_content, 'rb') as file:
-            document = file.read()
-            for user_id in user_ids:
-                private_key_pem = user_keys.get(user_id, {}).get('private_key')
-                if private_key_pem:
-                    private_key = serialization.load_pem_private_key(
-                        private_key_pem.encode('utf-8'),
-                        password=None,
-                        backend=default_backend()
-                    )
-                    document_hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
-                    document_hash.update(document)
-                    signature = private_key.sign(
-                        document_hash.finalize(),
-                        padding.PSS(
-                            mgf=padding.MGF1(hashes.SHA256()),
-                            salt_length=padding.PSS.MAX_LENGTH
-                        ),
-                        hashes.SHA256()
-                    )
-                    signatures[user_id] = signature.hex()
-                    metadata['signed_by'].append(user_id)
-    signed_document = {
-        "document_content": document,
-        "signatures": signatures,
-        "metadata": metadata
-    }
-    return signed_document
+    with open(document_content, 'rb') as file:
+        document = file.read()
+        hash_value = hashlib.sha256(document).digest()[:32]
+    private_key = read_user_private_keys(USER_DATA_FILE, user_ids)
+    all_key = 1
+    for id in private_key:
+        key_int = int(id, 16)
+        all_key *= key_int
+    finally_key = all_key % (2**256)
+    finally_key_bytes = finally_key.to_bytes(32, 'big')
+    signature = sign_obj.sign(finally_key_bytes, hash_value)
+    return signature
+
+def verify_signature_server(file_content, signature, user_ids):
+    with open(file_content, 'rb') as file:
+        document = file.read()
+        hash_value = hashlib.sha256(document).digest()[:32]
+    public_keys = read_user_private_keys(USER_DATA_FILE, user_ids)
+    all_key = 1
+    for key in public_keys:
+        key_int = int(key, 16)
+        all_key *= key_int
+    finally_key = all_key % (2**256)
+    finally_key_bytes = finally_key.to_bytes(32, 'big')
+    finally_key_1 = sign_obj.public_key_generate(finally_key_bytes)
+    signature_dict = json.loads(signature)
+    signature_value = signature_dict['signatures']
+    signature_bytes = bytearray.fromhex(signature_value)
+    if not sign_obj.verify(finally_key_1, hash_value, signature_bytes):
+        return False
+    return True
 
 @app.route('/logout')
 def logout():
@@ -117,7 +107,6 @@ def get_signature():
                 format=serialization.PrivateFormat.PKCS8,
                 encryption_algorithm=serialization.NoEncryption()
             ).decode('utf-8')
-
             save_user_data()
         return jsonify({'user_data': {user_id: user_data[user_id]}})
     else:
@@ -138,38 +127,15 @@ def add_user():
     if user_id not in user_data:
         hashed_password = generate_password_hash(password)
         private_key, public_key = generate_key_pair()
-        with open('placeholder_file.txt', 'w') as f:
-            f.write('This is a placeholder file.')
-        document_path = 'placeholder_file.txt'
-        document_hash = hashlib.sha256()
-        with open(document_path, 'rb') as file:
-            while chunk := file.read(8192):
-                document_hash.update(chunk)
-        document_digest = document_hash.digest()
-        signature = private_key.sign(
-            document_digest,
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
-        )
+        public_key_hex = hexlify(public_key).decode('utf-8')
+        private_key_hex = hexlify(private_key).decode('utf-8')
         user_data[user_id] = {
             'fio': user_fio,
-            'public_key': public_key.public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            ).decode('utf-8'),
-            'private_key': private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ).decode('utf-8'),
-            'signature': signature.hex(),  # Сохраните подпись
+            'public_key': public_key_hex,
+            'private_key': private_key_hex,
             'password_hash': hashed_password
         }
         save_user_data()
-        os.remove('placeholder_file.txt')
         return jsonify({'message': 'User added successfully', 'user_data': user_data[user_id]})
     else:
         return jsonify({'error': 'User with this ID already exists'})
@@ -184,14 +150,6 @@ def authenticate_user(username, password):
         hashed_password = user_data[username]['password_hash']
         return check_password_hash(hashed_password, password)
     return False
-
-@app.route('/sign_document', methods=['POST'])
-def sign_document():
-    data = request.get_json()
-    document = data.get('document')
-    user_ids = data.get('user_ids', [])
-    signatures = sign_document_server(document, user_ids)
-    return jsonify({'signatures': signatures})
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -218,12 +176,27 @@ def upload_file():
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         document_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         user_ids = request.form.getlist('user_ids')
-        signatures = sign_document_server(document_path, user_ids)
+        signatures = hexlify(sign_document_server(document_path, user_ids)).decode('utf-8')
         return jsonify({'signatures': signatures})
 
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/verify_signature', methods=['POST'])
+def verify_signature():
+    file_content = request.files['file'].read()
+    signature_content = request.files['signature'].read()
+    user_ids = request.form.getlist('user_ids')
+    if not file_content or not signature_content or not user_ids:
+        return jsonify({'error': 'Filename, signature, or user_ids missing'})
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(request.files['file'].filename))
+    with open(file_path, 'wb') as file:
+        file.write(file_content)
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'})
+    is_valid = verify_signature_server(file_path, signature_content, user_ids)
+    return jsonify({'is_valid': is_valid})
 
 def load_user_keys():
     try:
@@ -234,33 +207,6 @@ def load_user_keys():
     return user_keys
 
 user_keys = load_user_keys()
-
-@app.route('/sign_and_download', methods=['POST'])
-def sign_and_download():
-    data = request.form
-    user_ids = data.getlist('user_ids')
-    file = request.files['file']
-    signatures = {}
-    for user_id in user_ids:
-        private_key_pem = user_keys.get(user_id, {}).get('private_key')
-        if private_key_pem:
-            private_key = serialization.load_pem_private_key(
-                private_key_pem.encode('utf-8'),
-                password=None,
-                backend=default_backend()
-            )
-            document = file.read()
-            document_hash = hashlib.sha256(document).digest()
-            signature = private_key.sign(
-                document_hash,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
-            )
-            signatures[user_id] = signature
-    return jsonify({'signatures': signatures})
 
 if __name__ == '__main__':
     app.run(debug=True)
