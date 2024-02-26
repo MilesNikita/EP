@@ -4,7 +4,6 @@ from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui, QtWidgets
 from gui import Ui_MainWindow
 import requests
-from OpenSSL import crypto
 
 class AppMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -69,7 +68,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
     def verify_documet(self):
         file_path = self.lineEdit.text()
         file_dialog = QFileDialog(self)
-        file_path_sert, _ = file_dialog.getOpenFileName(self, 'Выберите файл подписи', '', 'Все файлы (*)')
+        file_path_sert, _ = file_dialog.getOpenFileName(self, 'Выберите файл подписи', '', 'Файлы подписи (*.ezp)')
         if file_path_sert:
             if file_path:
                 url = f'http://{self.server_ip}:{self.server_port}/verify_signature'
@@ -85,7 +84,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
                     response = requests.post(url, files=files, data=data)
                     if response.status_code == 200:
                         if response.content:
-                            QMessageBox.information(self, 'Успех', 'Файл успешно подписан и скачан.')
+                            QMessageBox.information(self, 'Успех', 'Файл успешно проверен, подписи совпадают.')
                         else:
                             QMessageBox.critical(self, 'Ошибка', 'Подпись не совпадает.')
                     else:

@@ -7,9 +7,6 @@ from werkzeug.utils import secure_filename
 import json
 import os
 import hashlib
-from datetime import datetime
-import base64
-import mimetypes
 import gostcrypto
 import secrets
 from binascii import hexlify
@@ -56,38 +53,40 @@ def read_user_private_keys(json_file, user_ids):
             puplick_key.append(user_info['private_key'])
     return puplick_key
 
+def split_byte_string(byte_string, parts):
+    segment_length = len(byte_string) // parts
+    segments = [byte_string[i:i+segment_length] for i in range(0, len(byte_string), segment_length)]
+    return segments
+
 def sign_document_server(document_content, user_ids):
     with open(document_content, 'rb') as file:
         document = file.read()
         hash_value = hashlib.sha256(document).digest()[:32]
     private_key = read_user_private_keys(USER_DATA_FILE, user_ids)
-    all_key = 1
-    for id in private_key:
-        key_int = int(id, 16)
-        all_key *= key_int
-    finally_key = all_key % (2**256)
-    finally_key_bytes = finally_key.to_bytes(32, 'big')
-    signature = sign_obj.sign(finally_key_bytes, hash_value)
+    signature = b''
+    for key in private_key:
+        key_bytes = bytearray(key, 'utf-8')[:32]
+        signature += sign_obj.sign(key_bytes, hash_value)
     return signature
 
 def verify_signature_server(file_content, signature, user_ids):
+    save_id = 0
     with open(file_content, 'rb') as file:
         document = file.read()
         hash_value = hashlib.sha256(document).digest()[:32]
     public_keys = read_user_private_keys(USER_DATA_FILE, user_ids)
-    all_key = 1
-    for key in public_keys:
-        key_int = int(key, 16)
-        all_key *= key_int
-    finally_key = all_key % (2**256)
-    finally_key_bytes = finally_key.to_bytes(32, 'big')
-    finally_key_1 = sign_obj.public_key_generate(finally_key_bytes)
-    signature_dict = json.loads(signature)
-    signature_value = signature_dict['signatures']
-    signature_bytes = bytearray.fromhex(signature_value)
-    if not sign_obj.verify(finally_key_1, hash_value, signature_bytes):
+    signature_data = json.loads(signature)
+    signatures = signature_data.get('signatures', '')
+    signatures_list = split_byte_string(signatures, len(user_ids))
+    for key, sign in zip(public_keys, signatures_list):
+        key_bytes = bytearray(key, 'utf-8')
+        sign_bytes = bytearray(sign, 'utf-8')[:64]
+        if sign_obj.verify(key_bytes, hash_value, sign_bytes):
+            save_id += 1
+    if save_id == len(user_ids):
+        return True
+    else:
         return False
-    return True
 
 @app.route('/logout')
 def logout():
