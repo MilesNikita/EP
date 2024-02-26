@@ -61,26 +61,26 @@ def split_byte_string(byte_string, parts):
 def sign_document_server(document_content, user_ids):
     with open(document_content, 'rb') as file:
         document = file.read()
-        hash_value = hashlib.sha256(document).digest()[:32]
+        hash_value = hashlib.sha256(document).digest()
     private_key = read_user_private_keys(USER_DATA_FILE, user_ids)
     signature = b''
     for key in private_key:
-        key_bytes = bytearray(key, 'utf-8')[:32]
+        key_bytes = bytearray(key)
         signature += sign_obj.sign(key_bytes, hash_value)
-    return signature
+    return list(signature)
 
 def verify_signature_server(file_content, signature, user_ids):
     save_id = 0
     with open(file_content, 'rb') as file:
         document = file.read()
         hash_value = hashlib.sha256(document).digest()[:32]
-    public_keys = read_user_private_keys(USER_DATA_FILE, user_ids)
+    public_keys = read_user_public_keys(USER_DATA_FILE, user_ids)
     signature_data = json.loads(signature)
     signatures = signature_data.get('signatures', '')
     signatures_list = split_byte_string(signatures, len(user_ids))
     for key, sign in zip(public_keys, signatures_list):
-        key_bytes = bytearray(key, 'utf-8')
-        sign_bytes = bytearray(sign, 'utf-8')[:64]
+        key_bytes = bytearray(key)
+        sign_bytes = bytearray(sign)
         if sign_obj.verify(key_bytes, hash_value, sign_bytes):
             save_id += 1
     if save_id == len(user_ids):
@@ -92,24 +92,6 @@ def verify_signature_server(file_content, signature, user_ids):
 def logout():
     session.pop('user_id', None)
     return redirect(url_for('index'))
-
-
-@app.route('/get_signature', methods=['POST'])
-def get_signature():
-    user_id = session.get('user_id')
-    if user_id:
-        user_fio = user_data[user_id]['fio']
-        if 'private_key' not in user_data[user_id]:
-            private_key, public_key = generate_key_pair()
-            user_data[user_id]['private_key'] = private_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
-            ).decode('utf-8')
-            save_user_data()
-        return jsonify({'user_data': {user_id: user_data[user_id]}})
-    else:
-        return jsonify({'error': 'User not authenticated'})
 
 
 @app.route('/')
@@ -126,12 +108,12 @@ def add_user():
     if user_id not in user_data:
         hashed_password = generate_password_hash(password)
         private_key, public_key = generate_key_pair()
-        public_key_hex = hexlify(public_key).decode('utf-8')
-        private_key_hex = hexlify(private_key).decode('utf-8')
+        private_key_list = list(private_key)
+        public_key_list = list(public_key)
         user_data[user_id] = {
             'fio': user_fio,
-            'public_key': public_key_hex,
-            'private_key': private_key_hex,
+            'public_key': public_key_list,
+            'private_key': private_key_list,
             'password_hash': hashed_password
         }
         save_user_data()
@@ -175,7 +157,7 @@ def upload_file():
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
         document_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         user_ids = request.form.getlist('user_ids')
-        signatures = hexlify(sign_document_server(document_path, user_ids)).decode('utf-8')
+        signatures = sign_document_server(document_path, user_ids)
         return jsonify({'signatures': signatures})
 
 @app.route('/uploads/<filename>')
