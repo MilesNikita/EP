@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5 import QtCore, QtGui, QtWidgets
 from gui import Ui_MainWindow
 import requests
+import json
 
 class AppMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -83,7 +84,9 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
                 try:
                     response = requests.post(url, files=files, data=data)
                     if response.status_code == 200:
-                        if response.content:
+                        status_data = json.loads(response.content)
+                        status = status_data.get('is_valid', '')
+                        if status == True:
                             QMessageBox.information(self, 'Успех', 'Файл успешно проверен, подписи совпадают.')
                         else:
                             QMessageBox.critical(self, 'Ошибка', 'Подпись не совпадает.')
