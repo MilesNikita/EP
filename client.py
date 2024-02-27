@@ -1,6 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QMessageBox, QFileDialog
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5 import QtCore, QtGui, QtWidgets
 from gui import Ui_MainWindow
 import requests
@@ -8,12 +8,15 @@ import json
 import gostcrypto
 import secrets
 import os
+import socket
+import hashlib
+import time
 
 sign_obj_256 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
     gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
 
 sign_obj_512 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_512,
-    gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-512-paramSetB'])
+    gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-12-512-paramSetB'])
 
 class AppMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -27,6 +30,26 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         self.pushButton_4.clicked.connect(self.verify_documet)
         self.server_ip = ''
         self.server_port = ''
+        self.user_name = ''
+
+    def sign_document_client(self):
+        if self.switch.isChecked():
+            private_key_file = self.user_name + "_key/private_key_256.key"
+        elif self.switch2.isChecked():
+            private_key_file = self.user_name + "_key/private_key_512.key"
+        else:
+            QMessageBox.critical(self, 'Ошибка', 'Выберите размерность ключа')
+        with open(self.lineEdit.text(), 'rb') as file:
+            document = file.read()
+        hash_value = hashlib.sha256(document).digest()
+        with open(private_key_file, 'rb') as file:
+            private_key = file.read()
+        signature = b''
+        if self.switch.isChecked():
+            signature += sign_obj_256.sign(private_key, hash_value)
+        if self.switch2.isChecked():
+            signature += sign_obj_512.sign(private_key, hash_value)
+        return list(signature)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -59,13 +82,13 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
                 QMessageBox.warning(self, 'Предупреждение', 'Выберите хотя бы одного пользователя для подписи файла.')
                 return
             url = f'http://{self.server_ip}:{self.server_port}/upload_file'
+            signature = self.sign_documet()
             files = {'file': open(file_path, 'rb')}
-            data = {'user_ids': selected_users}
+            data = {'user_ids': selected_users, 'signatures': signature}
             try:
                 response = requests.post(url, files=files, data=data)
                 if response.status_code == 200:
-                    new_file_name = file_path + '.ezp'
-                    with open(new_file_name, 'wb') as f:
+                    with open(file_path, 'ab') as f:
                         f.write(response.content)
                     QMessageBox.information(self, 'Успех', 'Файл успешно подписан и скачан.')
                 else:
@@ -157,6 +180,7 @@ class LoginWindow(QMainWindow):
         self.server_ip_login = self.ip_input.text()
         self.server_port_login = self.port_input.text()
         username = self.username_input.text()
+        self.user_name = username
         password = self.password_input.text()
         server_url = f'http://{self.server_ip_login}:{self.server_port_login}/login'
         data = {'username': username, 'password': password}
@@ -175,6 +199,7 @@ class LoginWindow(QMainWindow):
         self.app_main_window = AppMainWindow()
         self.app_main_window.server_port = self.server_port_login
         self.app_main_window.server_ip = self.server_ip_login
+        self.app_main_window.user_name = self.user_name
         self.app_main_window.show()
         self.app_main_window.setWindowTitle("Коллективная электронная подпись")
         for i in fio:
@@ -217,6 +242,7 @@ class RegistWindow(QMainWindow):
         self.password_input = QtWidgets.QLineEdit(self)
         self.password_input.setEchoMode(QtWidgets.QLineEdit.Password)
         self.regist_button = QtWidgets.QPushButton('Создать')
+        self.regist_button.clicked.connect(self.create_user)
         layout.addWidget(self.ip_label)
         layout.addWidget(self.ip_input)
         layout.addWidget(self.port_label)
@@ -227,6 +253,7 @@ class RegistWindow(QMainWindow):
         layout.addWidget(self.name_input)
         layout.addWidget(self.password_label)
         layout.addWidget(self.password_input)
+        layout.addWidget(self.regist_button)
         self.central_widget.setLayout(layout)
         self.setFixedSize(400,300)
     
@@ -241,13 +268,13 @@ class RegistWindow(QMainWindow):
         key_public_256 = sign_obj_256.public_key_generate(key_privat_256)
         key_public_512 = sign_obj_512.public_key_generate(key_privat_512)
         os.mkdir(username+'_key')
-        with open("/" + username + "_key/private_key_256", 'wb') as f:
-            f.write(list(key_privat_256))
-        with open("/" + username + "_key/private_key_512", 'wb') as f:
-            f.write(list(key_privat_512))
+        with open(username + "_key/private_key_256.key", 'wb') as f:
+            f.write((key_privat_256))
+        with open(username + "_key/private_key_512.key", 'wb') as f:
+            f.write((key_privat_512))
         server_url = f'http://{server_ip_login}:{server_port_login}/add_user'
         data = {'username' : username, 'name' : name, 'password' : password, 
-                'pulic_key_256' : list(key_public_256), 'public_key_512' : list(key_public_512)}
+                'public_key_256' : list(key_public_256), 'public_key_512' : list(key_public_512)}
         try:
             with self.session.post(server_url, json=data) as response:
                 response.raise_for_status()

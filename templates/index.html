@@ -14,7 +14,8 @@
             <tr>
                 <th>User ID</th>
                 <th>Полное имя</th>
-                <th>Открытиый ключ</th>
+                <th>Открытиый ключ 256</th>
+                <th>Открытый ключ 512</th>
             </tr>
         </thead>
         <tbody>
@@ -23,7 +24,8 @@
                 <tr>
                     <td>{{ user_id }}</td>
                     <td>{{ user_info.fio }}</td>
-                    <td>{{ user_info.public_key }}</td>
+                    <td>{{ user_info.public_key_256}}</td>
+                    <td>{{ user_info.public_key_512}}</td>
                 </tr>
             {% endfor %}
         </tbody>
@@ -63,30 +65,9 @@
                 const newRow = tableBody.insertRow();
                 newRow.insertCell(0).textContent = userId;
                 newRow.insertCell(1).textContent = userInfo.fio;
-                newRow.insertCell(2).textContent = userInfo.public_key;
-                newRow.insertCell(3).textContent = userInfo.signature;
+                newRow.insertCell(2).textContent = userInfo.public_key_256;
+                newRow.insertCell(3).textContent = userInfo.public_key_256;
             }
-        }
-    
-        async function addUser() {
-            const form = document.getElementById('addUserForm');
-            const userId = form.querySelector('[name="add_user_id"]').value;
-            const userFio = form.querySelector('[name="add_user_fio"]').value;
-            const userPassword = form.querySelector('[name="add_user_password"]').value;
-            const response = await fetch('/add_user', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({
-                    'add_user_id': userId,
-                    'add_user_fio': userFio,
-                    'add_user_password': userPassword,
-                }),
-            });
-            const result = await response.json();
-            updateUserTable(result.user_data);
-            form.reset();
         }
     
         function updateUserTable(userData) {
@@ -95,8 +76,8 @@
                 const newRow = tableBody.insertRow();
                 newRow.insertCell(0).textContent = userId;
                 newRow.insertCell(1).textContent = userInfo.fio;
-                newRow.insertCell(2).textContent = userInfo.public_key;
-                newRow.insertCell(3).textContent = userInfo.signature;
+                newRow.insertCell(2).textContent = userInfo.public_key_256;
+                newRow.insertCell(3).textContent = userInfo.public_key_512;
             }
         }
     </script>
