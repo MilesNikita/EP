@@ -88,12 +88,6 @@ def verify_signature_server(file_content, signature, user_ids):
     else:
         return False
 
-@app.route('/logout')
-def logout():
-    session.pop('user_id', None)
-    return redirect(url_for('index'))
-
-
 @app.route('/')
 def index():
     user_id = session.get('user_id')
@@ -102,24 +96,23 @@ def index():
 
 @app.route('/add_user', methods=['POST'])
 def add_user():
-    user_id = request.form['add_user_id']
-    user_fio = request.form['add_user_fio']
-    password = request.form['add_user_password']
+    user_id = request.form['username']
+    user_fio = request.form['name']
+    password = request.form['password']
+    public_key_256 = request.form['pulic_key_256']
+    public_key_512 = request.form['pulic_key_512']
     if user_id not in user_data:
         hashed_password = generate_password_hash(password)
-        private_key, public_key = generate_key_pair()
-        private_key_list = list(private_key)
-        public_key_list = list(public_key)
         user_data[user_id] = {
             'fio': user_fio,
-            'public_key': public_key_list,
-            'private_key': private_key_list,
+            'public_key_256': public_key_256,
+            'public_key_512': public_key_512,
             'password_hash': hashed_password
         }
         save_user_data()
-        return jsonify({'message': 'User added successfully', 'user_data': user_data[user_id]})
+        return jsonify({'status': 'CREATE_SUCCESS'})
     else:
-        return jsonify({'error': 'User with this ID already exists'})
+        return jsonify({'status': 'CREATE_ERROR'})
 
 def save_user_data():
     with open(USER_DATA_FILE, 'w') as file:

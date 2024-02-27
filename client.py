@@ -5,6 +5,15 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from gui import Ui_MainWindow
 import requests
 import json
+import gostcrypto
+import secrets
+import os
+
+sign_obj_256 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
+    gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
+
+sign_obj_512 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_512,
+    gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-512-paramSetB'])
 
 class AppMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self):
@@ -112,7 +121,7 @@ class LoginWindow(QMainWindow):
 
     def init_ui(self):
         self.setWindowTitle('Вход')
-        self.setGeometry(200, 200, 400, 200)
+        self.setGeometry(200, 250, 400, 200)
         self.central_widget = QWidget(self)
         self.setCentralWidget(self.central_widget)
         layout = QtWidgets.QVBoxLayout()
@@ -129,6 +138,8 @@ class LoginWindow(QMainWindow):
         self.password_input.setEchoMode(QtWidgets.QLineEdit.Password)
         self.login_button = QtWidgets.QPushButton('Войти')
         self.login_button.clicked.connect(self.login)
+        self.register_button = QtWidgets.QPushButton('Зарегестрироваться')
+        self.register_button.clicked.connect(self.open_regist_windoW)
         layout.addWidget(self.ip_label)
         layout.addWidget(self.ip_input)
         layout.addWidget(self.port_label)
@@ -138,6 +149,7 @@ class LoginWindow(QMainWindow):
         layout.addWidget(self.password_label)
         layout.addWidget(self.password_input)
         layout.addWidget(self.login_button)
+        layout.addWidget(self.register_button)
         self.central_widget.setLayout(layout)
         self.setFixedSize(400,300)
 
@@ -170,8 +182,81 @@ class LoginWindow(QMainWindow):
         self.hide()
         self.app_main_window.closed.connect(self.show_login_window)
     
+
+    def open_regist_windoW(self):
+        self.app_reigst_window = RegistWindow()
+        self.app_reigst_window.show()
+        self.app_reigst_window.setWindowTitle("Создание учетной записи")
+
     def show_login_window(self):
         self.show()
+
+class RegistWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.session = requests.Session()  
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('Создание учетной записи')
+        self.setGeometry(200, 200, 400, 200)
+        self.central_widget = QWidget(self)
+        self.setCentralWidget(self.central_widget)
+        layout = QtWidgets.QVBoxLayout()
+        self.ip_label = QtWidgets.QLabel('IP сервера:')
+        self.ip_input = QtWidgets.QLineEdit(self)
+        self.ip_input.setText('127.0.0.1') 
+        self.port_label = QtWidgets.QLabel('Порт сервера:')
+        self.port_input = QtWidgets.QLineEdit(self)
+        self.port_input.setText('5000') 
+        self.username_label = QtWidgets.QLabel('Логин:')
+        self.username_input = QtWidgets.QLineEdit(self)
+        self.name_label = QtWidgets.QLabel('ФИО')
+        self.name_input = QtWidgets.QLineEdit(self)
+        self.password_label = QtWidgets.QLabel('Пароль:')
+        self.password_input = QtWidgets.QLineEdit(self)
+        self.password_input.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.regist_button = QtWidgets.QPushButton('Создать')
+        layout.addWidget(self.ip_label)
+        layout.addWidget(self.ip_input)
+        layout.addWidget(self.port_label)
+        layout.addWidget(self.port_input)
+        layout.addWidget(self.username_label)
+        layout.addWidget(self.username_input)
+        layout.addWidget(self.name_label)
+        layout.addWidget(self.name_input)
+        layout.addWidget(self.password_label)
+        layout.addWidget(self.password_input)
+        self.central_widget.setLayout(layout)
+        self.setFixedSize(400,300)
+    
+    def create_user(self):
+        server_ip_login = self.ip_input.text()
+        server_port_login = self.port_input.text()
+        username = self.username_input.text()
+        name = self.name_input.text()
+        password = self.password_input.text()
+        key_privat_256 = bytearray(secrets.token_bytes(32))
+        key_privat_512 = bytearray(secrets.token_bytes(64))
+        key_public_256 = sign_obj_256.public_key_generate(key_privat_256)
+        key_public_512 = sign_obj_512.public_key_generate(key_privat_512)
+        os.mkdir(username+'_key')
+        with open("/" + username + "_key/private_key_256", 'wb') as f:
+            f.write(list(key_privat_256))
+        with open("/" + username + "_key/private_key_512", 'wb') as f:
+            f.write(list(key_privat_512))
+        server_url = f'http://{server_ip_login}:{server_port_login}/add_user'
+        data = {'username' : username, 'name' : name, 'password' : password, 
+                'pulic_key_256' : list(key_public_256), 'public_key_512' : list(key_public_512)}
+        try:
+            with self.session.post(server_url, json=data) as response:
+                response.raise_for_status()
+                if response.json()['status'] == 'CREATE_SUCCESS':
+                    QMessageBox.information(self, 'Успех', 'Пользователь добавлен.')
+                else:
+                    QMessageBox.critical(self, 'Ошибка', 'Пользователь с таким логином/фио уже существует.')
+        except requests.exceptions.RequestException as e:
+            QMessageBox.critical(self, 'Ошибка', f'An error occurred: {e}')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
