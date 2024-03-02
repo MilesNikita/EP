@@ -59,22 +59,6 @@ def split_byte_string(byte_string, parts):
     segments = [byte_string[i:i+segment_length] for i in range(0, len(byte_string), segment_length)]
     return segments
 
-def send_notification_to_users(user_ids, message):
-    for user_id in user_ids:
-        # Здесь отправьте уведомление каждому пользователю с идентификатором user_id
-        send_notification(user_id, message)
-
-def sign_document_server(document_content, user_ids):
-    with open(document_content, 'rb') as file:
-        document = file.read()
-        hash_value = hashlib.sha256(document).digest()
-    private_key = read_user_private_keys(USER_DATA_FILE, user_ids)
-    signature = b''
-    for key in private_key:
-        key_bytes = bytearray(key)
-        signature += sign_obj.sign(key_bytes, hash_value)
-    return list(signature)
-
 def verify_signature_server(file_content, signature, user_ids):
     save_id = 0
     with open(file_content, 'rb') as file:
@@ -99,13 +83,6 @@ def index():
     user_id = session.get('user_id')
     return render_template('index.html', user_data=user_data, user_id=user_id)
 
-
-@app.route('check_me', methods=['POST'])
-def check_me():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    
-
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.get_json()
@@ -114,13 +91,15 @@ def add_user():
     password = data.get('password')
     public_key_256 = data.get('public_key_256')
     public_key_512 = data.get('public_key_512')
+    ip_address = data.get('ip')
     if user_id not in user_data:
         hashed_password = generate_password_hash(password)
         user_data[user_id] = {
                 'fio': user_fio,
                 'public_key_256': public_key_256,
                 'public_key_512': public_key_512,
-                'password_hash': hashed_password
+                'password_hash': hashed_password,
+                'ip': ip_address
         }
         save_user_data()
         return jsonify({'status': 'CREATE_SUCCESS'})
@@ -152,47 +131,34 @@ def login():
     else:
         return jsonify({'status': 'AUTH_FAILED'})
 
-@app.route('/request_signature', methods=['POST'])
-def request_signature():
-    data = request.get_json()
-    user_ids = data.get('user_ids', [])
-    document_content = data.get('document_content', '')
-    if user_ids and document_content:
-        message = "Пользователь admin запрашивает вашу подпись для документа"
-        send_notification_to_users(user_ids, message)
-        return jsonify({'status': 'success'})
-    else:
-        return jsonify({'status': 'error', 'message': 'Missing user IDs or document content'})
-
-@app.route('/handle_signature_request', methods=['POST'])
-def handle_signature_request():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    response = data.get('response')
-    if user_id and response:
-        handle_signature_response(user_id, response)
-        return jsonify({'status': 'success'})
-    else:
-        return jsonify({'status': 'error', 'message': 'Missing user ID or response'})
-
-@app.route('/upload_file', methods=['POST'])
+@app.route('/sign', methods=['POST'])
 def upload_file():
-    if 'file' not in request.files:
-        return 'No file part'
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file'
-    if file:
-        filename = secure_filename(file.filename)
-        file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-        document_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        user_ids = request.form.getlist('user_ids')
-        signatures = sign_document_server(document_path, user_ids)
-        return jsonify({'signatures': signatures})
-
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    hash_value = request.form.get('hash')
+    user_ids = request.form.getlist('user_ids')
+    type_key = request.form.get('type_key')
+    with open(USER_DATA_FILE, 'r') as file:
+        users_info = json.load(file)
+    for user_id in user_ids:
+        user_info = users_info.get(user_id)
+        if user_info.get('fio') in user_ids:
+            ip = user_info.get('ip')
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                client_socket.connect((ip, 5002))
+                data = {
+                    'hash' : hash_value,
+                    'type_key' : type_key
+                }
+                client_socket.send(data)
+            except ConnectionRefusedError:
+                print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
+            except TimeoutError:
+                print(f"Таймаут при подключении к пользователю {user_id}")
+            except socket.error as e:
+                print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
+            finally:
+                client_socket.close()
+    return jsonify({'message': 'Данные успешно отправлены пользователям'})
 
 @app.route('/verify_signature', methods=['POST'])
 def verify_signature():

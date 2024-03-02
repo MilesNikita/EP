@@ -11,6 +11,10 @@ import os
 import socket
 import hashlib
 import time
+import threading
+import socket
+import json
+
 
 sign_obj_256 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
     gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
@@ -26,11 +30,13 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         self.action_3.triggered.connect(self.show_program_info)
         self.pushButton.clicked.connect(self.click_add)
         self.pushButton_2.clicked.connect(self.click_del)
-        self.pushButton_3.clicked.connect(self.sign_document)
+        self.pushButton_3.clicked.connect(self.sign_documet)
         self.pushButton_4.clicked.connect(self.verify_documet)
         self.server_ip = ''
         self.server_port = ''
         self.user_name = ''
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.client_socket.connect(('localhost', 5000))
 
     def sign_document_client(self):
         if self.switch.isChecked():
@@ -74,30 +80,6 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
             row = self.listWidget.row(selected_item)
             self.listWidget.takeItem(row)
     
-    def sign_document(self):
-        file_path = self.lineEdit.text()
-        if file_path:
-            selected_users = [self.listWidget.item(i).text() for i in range(self.listWidget.count())]
-            if not selected_users:
-                QMessageBox.warning(self, 'Предупреждение', 'Выберите хотя бы одного пользователя для подписи файла.')
-                return
-            url = f'http://{self.server_ip}:{self.server_port}/upload_file'
-            signature = self.sign_documet()
-            files = {'file': open(file_path, 'rb')}
-            data = {'user_ids': selected_users, 'signatures': signature}
-            try:
-                response = requests.post(url, files=files, data=data)
-                if response.status_code == 200:
-                    with open(file_path, 'ab') as f:
-                        f.write(response.content)
-                    QMessageBox.information(self, 'Успех', 'Файл успешно подписан и скачан.')
-                else:
-                    QMessageBox.critical(self, 'Ошибка', 'Произошла ошибка при подписании файла.')
-            except requests.exceptions.RequestException as e:
-                QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
-        else:
-            QMessageBox.warning(self, 'Предупреждение', 'Выберите файл для осуществления подписи')
-
     def verify_documet(self):
         file_path = self.lineEdit.text()
         file_dialog = QFileDialog(self)
@@ -130,6 +112,33 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
                 QMessageBox.warning(self, 'Предупреждение', 'Выберите файл для проверки подписи')
         else:
             QMessageBox.warning(self, 'Предупреждение', 'Выберите файл подписи')
+
+    def sign_documet(self):
+        file_path = self.lineEdit.text()
+        if file_path:
+            with open(self.lineEdit.text(), 'rb') as file:
+                document = file.read()
+            hash_value = hashlib.sha256(document).digest()
+            url = f'http://{self.server_ip}:{self.server_port}/sign'
+            selected_users = [self.listWidget.item(i).text() for i in range(self.listWidget.count())]
+            if not selected_users:
+                QMessageBox.warning(self, 'Ошибка', 'Выберите пользователей учавствующие в подписи файла.')
+            if self.switch.isChecked():
+                type_key = 256
+            if self.switch2.isChecked():
+                type_key = 512
+            data = {
+                'hash' : hash_value,
+                'user_ids': selected_users,
+                'key_type' : type_key
+            }
+            try:
+                response = requests.post(url, data=data)
+
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
+        else:
+            QMessageBox.critical(self, 'Ошибка', 'Выберите файл для создания подписи')
 
     closed = QtCore.pyqtSignal()
     def closeEvent(self, event):
@@ -194,6 +203,8 @@ class LoginWindow(QMainWindow):
                     QMessageBox.critical(self, 'Ошибка', 'Проверьте логин/пароль')
         except requests.exceptions.RequestException as e:
             QMessageBox.critical(self, 'Ошибка', f'An error occurred: {e}')
+        socket_thread = threading.Thread(target=self.create_socket)
+        socket_thread.start()
 
     def open_main_window(self, fio):
         self.app_main_window = AppMainWindow()
@@ -207,6 +218,14 @@ class LoginWindow(QMainWindow):
         self.hide()
         self.app_main_window.closed.connect(self.show_login_window)
     
+    def create_socket(self):
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.bind(('localhost', 5002)) 
+        client_socket.listen(1) 
+        while True:
+            conn, addr = client_socket.accept()
+            data = conn.recv(1024)
+            print(data)
 
     def open_regist_windoW(self):
         self.app_reigst_window = RegistWindow()
@@ -273,8 +292,14 @@ class RegistWindow(QMainWindow):
         with open(username + "_key/private_key_512.key", 'wb') as f:
             f.write((key_privat_512))
         server_url = f'http://{server_ip_login}:{server_port_login}/add_user'
-        data = {'username' : username, 'name' : name, 'password' : password, 
-                'public_key_256' : list(key_public_256), 'public_key_512' : list(key_public_512)}
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        data = {'username' : username, 
+                'name' : name, 
+                'password' : password, 
+                'public_key_256' : list(key_public_256), 
+                'public_key_512' : list(key_public_512),
+                'ip' : local_ip}
         try:
             with self.session.post(server_url, json=data) as response:
                 response.raise_for_status()
