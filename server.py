@@ -20,6 +20,8 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 sign_obj = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
     gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
 
+i_am_user = ''
+
 try:
     with open(USER_DATA_FILE, 'r', encoding='utf-8') as file:
         user_data = json.load(file)
@@ -118,12 +120,36 @@ def authenticate_user(username, password):
         return check_password_hash(hashed_password, password)
     return False
 
-@app.route('/signature', methods=['POST'])
-def signature():
-    data = request.get_json()
-    signature = data.get('signature')
-    print(signature)
+signatures = []
 
+@app.route('/signature', methods=['POST'])
+def update_signature():
+    data = request.get_json()
+    signatures.append(bytes.fromhex(data.get('sign')))
+    sign = b''
+    for i in signatures:
+        sign += i
+    sign_hex = sign.hex()
+    with open(USER_DATA_FILE, 'r') as file:
+        users_info = json.load(file)
+    for user_id in i_am_user:
+        user_info = users_info.get(user_id)
+        if user_info.get('fio') in i_am_user:
+            ip = user_info.get('ip')
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                client_socket.connect((ip, 5002))
+                data = {'sign': sign_hex}
+                client_socket.send(json.dumps(data).encode()) 
+            except ConnectionRefusedError:
+                print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
+            except TimeoutError:
+                print(f"Таймаут при подключении к пользователю {user_id}")
+            except socket.error as e:
+                print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
+            finally:
+                client_socket.close()
+    return jsonify({'message': 'OK'})
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -143,7 +169,7 @@ def upload_file():
     hash_value = request.form.get('hash')
     user_ids = request.form.getlist('user_ids')
     type_key = request.form.get('key_type')
-    print(type_key)
+    i_am_user = request.form.get('i_am')
     with open(USER_DATA_FILE, 'r') as file:
         users_info = json.load(file)
     for user_id in user_ids:
@@ -165,6 +191,8 @@ def upload_file():
                 print(f"Таймаут при подключении к пользователю {user_id}")
             except socket.error as e:
                 print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
+            finally:
+                client_socket.close()
     return jsonify({'message': 'OK'})
 
 @app.route('/verify_signature', methods=['POST'])

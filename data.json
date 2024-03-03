@@ -198,7 +198,7 @@
       83
     ],
     "password_hash": "scrypt:32768:8:1$7gOmIdrTqKnNqEGX$c0155745342d37e81531fc9fcae2fca7da89293ec2db7e9ad20a741d10247ddd898aa8a0662639aa2f19640dfb69f53ddd1ccdfdeca44f19725ab4313fb1d4b2",
-    "ip": "192.168.247.56"
+    "ip": "192.168.247.226"
   },
   "user2": {
     "fio": "user2",
@@ -399,7 +399,7 @@
       168
     ],
     "password_hash": "scrypt:32768:8:1$rl8QsYciB4WhBHu9$c51ff963c361ee323d5056b97b0f24bde03b682e49974f8142b493b31434b44ffa9ef5d51e64f9431f400cf245eab22ec7860edd5b7e6c980db5a72cc2cb64e3",
-    "ip": "192.168.247.56"
+    "ip": "192.168.247.226"
   },
   "admin": {
     "fio": "admin",
@@ -600,6 +600,6 @@
       143
     ],
     "password_hash": "scrypt:32768:8:1$g3LFhGrPJPLB1QfU$c0cd28d73aee1d9c90be82b6ab100d74fae9e12c06f3de0dd0e96bf767cfbf59f8e337c7ee1cbe80d45e992aa10fbaed4e733c0632173e8d0ddacda0cb2633bc",
-    "ip": "192.168.247.56"
+    "ip": "192.168.247.226"
   }
 }
