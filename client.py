@@ -38,25 +38,6 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.connect(('localhost', 5000))
 
-    def sign_document_client(self):
-        if self.switch.isChecked():
-            private_key_file = self.user_name + "_key/private_key_256.key"
-        elif self.switch2.isChecked():
-            private_key_file = self.user_name + "_key/private_key_512.key"
-        else:
-            QMessageBox.critical(self, 'Ошибка', 'Выберите размерность ключа')
-        with open(self.lineEdit.text(), 'rb') as file:
-            document = file.read()
-        hash_value = hashlib.sha256(document).digest()
-        with open(private_key_file, 'rb') as file:
-            private_key = file.read()
-        signature = b''
-        if self.switch.isChecked():
-            signature += sign_obj_256.sign(private_key, hash_value)
-        if self.switch2.isChecked():
-            signature += sign_obj_512.sign(private_key, hash_value)
-        return list(signature)
-
     def open_file(self):
         file_dialog = QFileDialog(self)
         file_path, _ = file_dialog.getOpenFileName(self, 'Открытие файла', '', 'Все файлы (*)')
@@ -150,6 +131,7 @@ class LoginWindow(QMainWindow):
         super().__init__()
         self.session = requests.Session()  
         self.init_ui()
+        self.signature = []
 
     def init_ui(self):
         self.setWindowTitle('Вход')
@@ -218,14 +200,42 @@ class LoginWindow(QMainWindow):
         self.hide()
         self.app_main_window.closed.connect(self.show_login_window)
     
+    def sign_document_client(self, key_type, hash, user):
+        if key_type == 256:
+            private_key_file = user + "_key/private_key_256.key"
+        if key_type == 512:
+            private_key_file = user + "_key/private_key_512.key"
+        hash_value = hash
+        print('key:', private_key_file)
+        with open(private_key_file, 'rb') as file:
+            private_key = file.read()
+        signature = b''
+        if key_type == 256:
+            signature += sign_obj_256.sign(private_key, hash_value)
+        elif key_type == 512:
+            signature += sign_obj_512.sign(private_key, hash_value)
+        return list(signature)
+
     def create_socket(self):
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client_socket.bind(('localhost', 5002)) 
+        hostname = socket.gethostname()
+        client_socket.bind((socket.gethostbyname(hostname), 5002)) 
         client_socket.listen(1) 
         while True:
             conn, addr = client_socket.accept()
             data = conn.recv(1024)
-            print(data)
+            itog_data = json.loads(data.decode())
+            key_type = itog_data.get('type_key')
+            hash = itog_data.get('hash')
+            user = itog_data.get('user')
+            self.signature = self.sign_document_client(key_type, hash, user)
+            server_url = f'http://{self.server_ip_login}:{self.server_port_login}/signature'
+            data = {'signature': self.signature}
+            try:
+                with self.session.post(server_url, json=data) as response:
+                    response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                QMessageBox.critical(self, 'Ошибка', f'An error occurred: {e}')
 
     def open_regist_windoW(self):
         self.app_reigst_window = RegistWindow()

@@ -118,6 +118,13 @@ def authenticate_user(username, password):
         return check_password_hash(hashed_password, password)
     return False
 
+@app.route('/signature', methods=['POST'])
+def signature():
+    data = request.get_json()
+    signature = data.get('signature')
+    print(signature)
+
+
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -135,7 +142,8 @@ def login():
 def upload_file():
     hash_value = request.form.get('hash')
     user_ids = request.form.getlist('user_ids')
-    type_key = request.form.get('type_key')
+    type_key = request.form.get('key_type')
+    print(type_key)
     with open(USER_DATA_FILE, 'r') as file:
         users_info = json.load(file)
     for user_id in user_ids:
@@ -147,18 +155,17 @@ def upload_file():
                 client_socket.connect((ip, 5002))
                 data = {
                     'hash' : hash_value,
-                    'type_key' : type_key
+                    'type_key' : type_key,
+                    'user' : user_id
                 }
-                client_socket.send(data)
+                client_socket.send(json.dumps(data).encode()) 
             except ConnectionRefusedError:
                 print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
             except TimeoutError:
                 print(f"Таймаут при подключении к пользователю {user_id}")
             except socket.error as e:
                 print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
-            finally:
-                client_socket.close()
-    return jsonify({'message': 'Данные успешно отправлены пользователям'})
+    return jsonify({'message': 'OK'})
 
 @app.route('/verify_signature', methods=['POST'])
 def verify_signature():
