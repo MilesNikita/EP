@@ -20,8 +20,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 sign_obj = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
     gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
 
-i_am_user = ''
-
 try:
     with open(USER_DATA_FILE, 'r', encoding='utf-8') as file:
         user_data = json.load(file)
@@ -120,35 +118,33 @@ def authenticate_user(username, password):
         return check_password_hash(hashed_password, password)
     return False
 
-signatures = []
 
 @app.route('/signature', methods=['POST'])
 def update_signature():
     data = request.get_json()
-    signatures.append(bytes.fromhex(data.get('sign')))
+    signatures = bytes.fromhex(data.get('sign'))
+    i_am_user = data.get('i_am')
     sign = b''
-    for i in signatures:
-        sign += i
-    sign_hex = sign.hex()
+    sign_hex = signatures.hex()
     with open(USER_DATA_FILE, 'r') as file:
         users_info = json.load(file)
-    for user_id in i_am_user:
-        user_info = users_info.get(user_id)
-        if user_info.get('fio') in i_am_user:
-            ip = user_info.get('ip')
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                client_socket.connect((ip, 5002))
-                data = {'sign': sign_hex}
-                client_socket.send(json.dumps(data).encode()) 
-            except ConnectionRefusedError:
-                print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
-            except TimeoutError:
-                print(f"Таймаут при подключении к пользователю {user_id}")
-            except socket.error as e:
-                print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
-            finally:
-                client_socket.close()
+    user = users_info.get(i_am_user)
+    ip = user.get('ip')
+    print(ip)
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client_socket.connect((ip, 5002))
+        data = {'sign': sign_hex}
+        print(data)
+        client_socket.send(json.dumps(data).encode()) 
+    except ConnectionRefusedError:
+        print(f"Не удалось подключиться к пользователю соединение отклонено")
+    except TimeoutError:
+        print(f"Таймаут при подключении к пользователю")
+    except socket.error as e:
+        print(f"Произошла ошибка при подключении к пользователю: {e}")
+    finally:
+        client_socket.close()
     return jsonify({'message': 'OK'})
 
 @app.route('/login', methods=['POST'])
@@ -182,11 +178,14 @@ def upload_file():
                 data = {
                     'hash' : hash_value,
                     'type_key' : type_key,
-                    'user' : user_id
+                    'user' : user_id,
+                    'i_am' : i_am_user
                 }
                 client_socket.send(json.dumps(data).encode()) 
             except ConnectionRefusedError:
                 print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
+                return jsonify({'message': 'ERROR'})
+                break
             except TimeoutError:
                 print(f"Таймаут при подключении к пользователю {user_id}")
             except socket.error as e:

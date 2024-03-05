@@ -38,6 +38,9 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.client_socket.connect(('localhost', 5000))
 
+    def get_line_edit_text(self):
+        return self.lineEdit.text()
+
     def open_file(self):
         file_dialog = QFileDialog(self)
         file_path, _ = file_dialog.getOpenFileName(self, 'Открытие файла', '', 'Все файлы (*)')
@@ -117,7 +120,11 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
             }
             try:
                 response = requests.post(url, data=data)
-
+                if response.status_code == 200:
+                    status_data = json.loads(response.content)
+                    status = status_data.get('message')
+                    if status == 'ERROR':
+                        QMessageBox.critical(self, 'Ошибка', 'Один из пользователей не доступен для подписи')
             except requests.exceptions.RequestException as e:
                 QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
         else:
@@ -201,12 +208,15 @@ class LoginWindow(QMainWindow):
             self.app_main_window.comboBox.addItem(i)
         self.hide()
         self.app_main_window.closed.connect(self.show_login_window)
+        socket_thread = threading.Thread(target=self.create_socket, args=(self.app_main_window,))
+        socket_thread.start()
     
 
-    def update_sign(self):
+    def update_sign(self, i_am):
         sign = self.signature
         server_url = f'http://{self.server_ip_login}:{self.server_port_login}/signature'
-        data = {'sign': sign}
+        data = {'sign': sign,
+                'i_am': i_am}
         try:
             response = requests.post(server_url, json=data)
         except requests.exceptions.RequestException as e:
@@ -227,12 +237,9 @@ class LoginWindow(QMainWindow):
             signature = sign_obj_512.sign(private_key, hash_value)
         return signature.hex()
 
-    def create_socket(self):
-        client_socket = None
-        while True:
-            try:
-                if client_socket:
-                    client_socket.close()  
+    def create_socket(self, main_window_instance):
+        try:
+            while True:
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 hostname = socket.gethostname()
                 client_socket.bind((socket.gethostbyname(hostname), 5002)) 
@@ -242,18 +249,24 @@ class LoginWindow(QMainWindow):
                     data = conn.recv(1024)
                     itog_data = json.loads(data.decode())
                     if 'type_key' in itog_data:
+                        print('type')
                         key_type = itog_data.get('type_key')
                         hash_value = itog_data.get('hash')
                         user = itog_data.get('user')
+                        i_am = itog_data.get('i_am')
                         self.signature = self.sign_document_client(key_type, hash_value, user)
-                        self.update_sign()
+                        self.update_sign(i_am)
                     elif 'sign' in itog_data:
                         signature = itog_data.get('sign')
                         sign_bytes = bytes.fromhex(signature)
-                        with open(self.lineEdit.text(), 'ab') as file:
+                        print(sign_bytes)
+                        with open(main_window_instance.get_line_edit_text(), 'ab') as file:
                             file.write(sign_bytes)
-            except Exception as e:
-                print(f"Произошла ошибка в сокете: {e}")
+        except Exception as e:
+            print(f"Произошла ошибка в сокете: {e}")
+        finally:
+            if client_socket:
+                client_socket.close()
 
     def open_regist_windoW(self):
         self.app_reigst_window = RegistWindow()
