@@ -12,13 +12,19 @@ import secrets
 from binascii import hexlify
 import socket
 
+global main_window_instance
+
 app = Flask(__name__)
 app.secret_key = secrets.token_bytes(24)
 USER_DATA_FILE = 'data.json'
 UPLOAD_FOLDER = 'uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-sign_obj = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
+
+sign_obj_256 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
     gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-2012-256-paramSetB'])
+
+sign_obj_512 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_512,
+    gostcrypto.gostsignature.CURVES_R_1323565_1_024_2019['id-tc26-gost-3410-12-512-paramSetB'])
 
 try:
     with open(USER_DATA_FILE, 'r', encoding='utf-8') as file:
@@ -31,19 +37,21 @@ def save_user_data():
         serializable_data = {key: value.hex() if isinstance(value, bytearray) else value for key, value in user_data.items()}
         json.dump(serializable_data, file, indent=2)
 
-def generate_key_pair():
-    private_key = bytearray(secrets.token_bytes(32))
-    public_key = sign_obj.public_key_generate(private_key)
-    return private_key, public_key
-
-def read_user_public_keys(json_file, user_ids):
-    puplick_key = []
+def read_user_public_keys(json_file, user_ids, type_key):
+    puplick_keys = []
+    public_key = None
     with open(json_file, 'r') as file:
         data = json.load(file)
-    for id, user_info in data.items():
-        if user_info['fio'] in user_ids:
-            puplick_key.append(user_info['public_key'])
-    return puplick_key
+    for user_id in user_ids:
+        user_info = data.get(user_id)
+        if user_info:
+            if type_key == '256':
+                public_key = user_info.get('public_key_256')
+            elif type_key == '512':
+                public_key = user_info.get('public_key_512')
+            if public_key:
+                puplick_keys.append(public_key)
+    return puplick_keys
 
 def read_user_private_keys(json_file, user_ids):
     puplick_key = []
@@ -59,24 +67,21 @@ def split_byte_string(byte_string, parts):
     segments = [byte_string[i:i+segment_length] for i in range(0, len(byte_string), segment_length)]
     return segments
 
-def verify_signature_server(file_content, signature, user_ids):
+def verify_signature_server(file_content, signature, user_ids, type_key):
     save_id = 0
-    with open(file_content, 'rb') as file:
-        document = file.read()
-        hash_value = hashlib.sha256(document).digest()[:32]
-    public_keys = read_user_public_keys(USER_DATA_FILE, user_ids)
-    signature_data = json.loads(signature)
-    signatures = signature_data.get('signatures', '')
-    signatures_list = split_byte_string(signatures, len(user_ids))
-    for key, sign in zip(public_keys, signatures_list):
+    public_keys = read_user_public_keys(USER_DATA_FILE, user_ids, type_key)
+    signatures_list = signature.split(b"cola")[:-1]
+    byte_content = bytearray.fromhex(file_content.decode())
+    sign_obj = sign_obj_256 if type_key == '256' else sign_obj_512
+    for key in public_keys:
         key_bytes = bytearray(key)
-        sign_bytes = bytearray(sign)
-        if sign_obj.verify(key_bytes, hash_value, sign_bytes):
-            save_id += 1
-    if save_id == len(user_ids):
-        return True
-    else:
-        return False
+        for signs in signatures_list:
+            sign_bytes = bytearray(signs)
+            if sign_obj.verify(key_bytes, byte_content, sign_bytes):
+                save_id += 1
+                break 
+    return save_id == len(signatures_list)
+
 
 @app.route('/')
 def index():
@@ -129,13 +134,12 @@ def update_signature():
     with open(USER_DATA_FILE, 'r') as file:
         users_info = json.load(file)
     user = users_info.get(i_am_user)
-    ip = user.get('ip')
-    print(ip)
+    ip1 = user.get('ip')
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        client_socket.connect((ip, 5002))
+        ip, port = ip1.split(':')
+        client_socket.connect((ip, int(port)))
         data = {'sign': sign_hex}
-        print(data)
         client_socket.send(json.dumps(data).encode()) 
     except ConnectionRefusedError:
         print(f"Не удалось подключиться к пользователю соединение отклонено")
@@ -170,43 +174,36 @@ def upload_file():
         users_info = json.load(file)
     for user_id in user_ids:
         user_info = users_info.get(user_id)
-        if user_info.get('fio') in user_ids:
-            ip = user_info.get('ip')
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                client_socket.connect((ip, 5002))
-                data = {
+        ip1 = user_info.get('ip')
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            ip, port = ip1.split(':')
+            client_socket.connect((ip, int(port)))
+            data = {
                     'hash' : hash_value,
                     'type_key' : type_key,
                     'user' : user_id,
                     'i_am' : i_am_user
                 }
-                client_socket.send(json.dumps(data).encode()) 
-            except ConnectionRefusedError:
-                print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
-                return jsonify({'message': 'ERROR'})
-                break
-            except TimeoutError:
-                print(f"Таймаут при подключении к пользователю {user_id}")
-            except socket.error as e:
-                print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
-            finally:
-                client_socket.close()
+            client_socket.send(json.dumps(data).encode())
+            client_socket.close() 
+        except ConnectionRefusedError:
+            print(f"Не удалось подключиться к пользователю {user_id}: соединение отклонено")
+            return jsonify({'message': 'ERROR'})
+            break
+        except TimeoutError:
+            print(f"Таймаут при подключении к пользователю {user_id}")
+        except socket.error as e:
+            print(f"Произошла ошибка при подключении к пользователю {user_id}: {e}")
     return jsonify({'message': 'OK'})
 
 @app.route('/verify_signature', methods=['POST'])
 def verify_signature():
-    file_content = request.files['file'].read()
+    file_content = request.files['digest'].read()
     signature_content = request.files['signature'].read()
     user_ids = request.form.getlist('user_ids')
-    if not file_content or not signature_content or not user_ids:
-        return jsonify({'error': 'Filename, signature, or user_ids missing'})
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(request.files['file'].filename))
-    with open(file_path, 'wb') as file:
-        file.write(file_content)
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'File not found'})
-    is_valid = verify_signature_server(file_path, signature_content, user_ids)
+    type_key = request.form.get('type_key')
+    is_valid = verify_signature_server(file_content, signature_content, user_ids, type_key)
     return jsonify({'is_valid': is_valid})
 
 def load_user_keys():

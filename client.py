@@ -12,8 +12,6 @@ import socket
 import hashlib
 import time
 import threading
-import socket
-import json
 from urllib.parse import unquote
 
 sign_obj_256 = gostcrypto.gostsignature.new(gostcrypto.gostsignature.MODE_256,
@@ -35,8 +33,6 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         self.server_ip = ''
         self.server_port = ''
         self.user_name = ''
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client_socket.connect(('localhost', 5000))
 
     def get_line_edit_text(self):
         return self.lineEdit.text()
@@ -68,34 +64,51 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
         file_path = self.lineEdit.text()
         file_dialog = QFileDialog(self)
         file_path_sert, _ = file_dialog.getOpenFileName(self, 'Выберите файл подписи', '', 'Файлы подписи (*.ezp)')
-        if file_path_sert:
-            if file_path:
-                url = f'http://{self.server_ip}:{self.server_port}/verify_signature'
-                files = {
-                'file': open(file_path, 'rb'),
-                'signature': open(file_path_sert, 'rb')
-                }
-                selected_users = [self.listWidget.item(i).text() for i in range(self.listWidget.count())]
-                if not selected_users:
-                    QMessageBox.warning(self, 'Предупреждение', 'Выберите хотя бы одного пользователя для проверки подписи файла.')
-                data = {'user_ids': selected_users}
-                try:
-                    response = requests.post(url, files=files, data=data)
-                    if response.status_code == 200:
-                        status_data = json.loads(response.content)
-                        status = status_data.get('is_valid', '')
-                        if status == True:
-                            QMessageBox.information(self, 'Успех', 'Файл успешно проверен, подписи совпадают.')
+        if self.lineEdit.text() != 0:
+            with open(self.lineEdit.text(), 'rb') as file:
+                document = file.read()
+            with open(file_path_sert, 'rb') as file1:
+                sign = file1.read()
+            type_key = None
+            hash_value = None
+            if self.switch.isChecked():
+                type_key = 256
+                hash_value = hashlib.sha256(document).digest()
+            if self.switch2.isChecked():
+                type_key = 512
+                hash_value = hashlib.sha512(document).digest()
+            if file_path_sert:
+                if file_path:
+                    url = f'http://{self.server_ip}:{self.server_port}/verify_signature'
+                    files = {
+                    'digest' : hash_value.hex(),
+                    'signature': sign,
+                    }
+                    selected_users = [self.listWidget.item(i).text() for i in range(self.listWidget.count())]
+                    if not selected_users:
+                        QMessageBox.warning(self, 'Предупреждение', 'Выберите хотя бы одного пользователя для проверки подписи файла.')
+                    data = {'user_ids' : selected_users, 
+                            'type_key' : type_key
+                            }
+                    try:
+                        response = requests.post(url, files=files, data=data)
+                        if response.status_code == 200:
+                            status_data = json.loads(response.content)
+                            status = status_data.get('is_valid', '')
+                            if status == True:
+                                QMessageBox.information(self, 'Успех', 'Файл успешно проверен, подписи совпадают.')
+                            else:
+                                QMessageBox.critical(self, 'Ошибка', 'Подпись не совпадает.')
                         else:
-                            QMessageBox.critical(self, 'Ошибка', 'Подпись не совпадает.')
-                    else:
-                        QMessageBox.critical(self, 'Ошибка', 'Произошла ошибка при проверке подписи файла.')
-                except requests.exceptions.RequestException as e:
-                    QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
+                            QMessageBox.critical(self, 'Ошибка', 'Произошла ошибка при проверке подписи файла.')
+                    except requests.exceptions.RequestException as e:
+                        QMessageBox.critical(self, 'Ошибка', f"Произошла ошибка: {e}")
+                else:
+                    QMessageBox.warning(self, 'Предупреждение', 'Выберите файл для проверки подписи')
             else:
-                QMessageBox.warning(self, 'Предупреждение', 'Выберите файл для проверки подписи')
+                QMessageBox.warning(self, 'Предупреждение', 'Выберите файл подписи')
         else:
-            QMessageBox.warning(self, 'Предупреждение', 'Выберите файл подписи')
+            QMessageBox.warning(self, 'Ошибка', 'Выберите файл для проверки')
 
     def sign_documet(self):
         file_path = self.lineEdit.text()
@@ -106,6 +119,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
             selected_users = [self.listWidget.item(i).text() for i in range(self.listWidget.count())]
             if not selected_users:
                 QMessageBox.warning(self, 'Ошибка', 'Выберите пользователей учавствующие в подписи файла.')
+            hash_value = None
             if self.switch.isChecked():
                 type_key = 256
                 hash_value = hashlib.sha256(document).digest()
@@ -118,6 +132,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
                 'key_type' : type_key,
                 'i_am' : self.user_name
             }
+            print(data)
             try:
                 response = requests.post(url, data=data)
                 if response.status_code == 200:
@@ -133,7 +148,7 @@ class AppMainWindow(QMainWindow, Ui_MainWindow):
     closed = QtCore.pyqtSignal()
     def closeEvent(self, event):
         self.closed.emit()
-        super().closeEvent(event)
+        super().closeEvent(event) 
 
 class LoginWindow(QMainWindow):
     def __init__(self):
@@ -194,7 +209,7 @@ class LoginWindow(QMainWindow):
                     QMessageBox.critical(self, 'Ошибка', 'Проверьте логин/пароль')
         except requests.exceptions.RequestException as e:
             QMessageBox.critical(self, 'Ошибка', f'An error occurred: {e}')
-        socket_thread = threading.Thread(target=self.create_socket)
+        socket_thread = threading.Thread(target=self.create_socket, args=(self.app_main_window,))
         socket_thread.start()
 
     def open_main_window(self, fio):
@@ -217,6 +232,7 @@ class LoginWindow(QMainWindow):
         server_url = f'http://{self.server_ip_login}:{self.server_port_login}/signature'
         data = {'sign': sign,
                 'i_am': i_am}
+        print(data)
         try:
             response = requests.post(server_url, json=data)
         except requests.exceptions.RequestException as e:
@@ -238,36 +254,47 @@ class LoginWindow(QMainWindow):
         return signature.hex()
 
     def create_socket(self, main_window_instance):
+        client_socket = None
         try:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            hostname = socket.gethostname()
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            client_socket.bind((socket.gethostbyname(hostname), 5002))
+            client_socket.listen(10)
             while True:
-                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                hostname = socket.gethostname()
-                client_socket.bind((socket.gethostbyname(hostname), 5002)) 
-                client_socket.listen(1) 
-                while True:
-                    conn, addr = client_socket.accept()
-                    data = conn.recv(1024)
-                    itog_data = json.loads(data.decode())
-                    if 'type_key' in itog_data:
-                        print('type')
-                        key_type = itog_data.get('type_key')
-                        hash_value = itog_data.get('hash')
-                        user = itog_data.get('user')
-                        i_am = itog_data.get('i_am')
-                        self.signature = self.sign_document_client(key_type, hash_value, user)
-                        self.update_sign(i_am)
-                    elif 'sign' in itog_data:
-                        signature = itog_data.get('sign')
-                        sign_bytes = bytes.fromhex(signature)
-                        print(sign_bytes)
-                        with open(main_window_instance.get_line_edit_text(), 'ab') as file:
-                            file.write(sign_bytes)
+                conn, addr = client_socket.accept()
+                data = conn.recv(1024)
+                itog_data = json.loads(data.decode())
+                if 'type_key' in itog_data:
+                    print('type')
+                    key_type = itog_data.get('type_key')
+                    hash_value = itog_data.get('hash')
+                    user = itog_data.get('user')
+                    i_am = itog_data.get('i_am')
+                    self.signature = self.sign_document_client(key_type, hash_value, user)
+                    self.update_sign(i_am)
+                elif 'sign' in itog_data:
+                    signature = itog_data.get('sign')
+                    sign_bytes = bytes.fromhex(signature)
+                    print(sign_bytes)
+                    if main_window_instance:
+                        file_path = main_window_instance.get_line_edit_text()
+                        if file_path:
+                            file_extension = os.path.splitext(file_path)[1]
+                            file_name = os.path.splitext(file_path)[0] + ".ezp"
+                            if not os.path.exists(os.path.dirname(file_name)):
+                                os.makedirs(os.path.dirname(file_name))
+                            with open(file_name, 'ab') as file:
+                                file.write(sign_bytes)
+                                file.write(b"cola")
+                        else:
+                            print("Не удалось получить путь к файлу")
         except Exception as e:
-            print(f"Произошла ошибка в сокете: {e}")
+            print(f"Произошла ошибка при создании файла: {e}")
         finally:
             if client_socket:
                 client_socket.close()
-
+        
     def open_regist_windoW(self):
         self.app_reigst_window = RegistWindow()
         self.app_reigst_window.show()
